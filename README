@@ -30,7 +30,7 @@ A. How to build XNU:
   if you are using the xnu-build script.
 
   Here are the valid arm machine configs: 
-	OMAP3530 OMAP3430_RX51 OMAP335X ARMPBA8 S5L8930X S5L8920X S5L8922X
+	OMAP3530 OMAP3430_RX51 OMAP335X OMAP5432_UEVM ARMPBA8 S5L8930X S5L8920X S5L8922X
 
   Here are the valid armv6 machine configs: (YOU WILL *NEED* TO USE Xcode 4.4.1 or similar.)
 	S5L8720X S5L8900XRB ARM_RVEB_V6

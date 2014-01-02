@@ -30,6 +30,13 @@
 #ifndef _PLATFORMCONFIGS_H_
 #define _PLATFORMCONFIGS_H_
 
+/* ARMv7 Cortex-A15 platforms */
+//XXX: look at A15 vs A9 differences
+
+#ifdef BOARD_CONFIG_OMAP5432_UEVM
+#define __ARM_PROCESSOR_CLASS_CORTEX_A9__
+#endif
+
 /* ARMv7 Cortex-A9 platforms. */
 
 #ifdef BOARD_CONFIG_MSM8960_TOUCHPAD
