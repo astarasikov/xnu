@@ -56,10 +56,11 @@
 #define GPT2_BASE		(OMAP54XX_L4_PER_BASE  + 0x32000)
 
 #define OMAP5_TIMER_BASE GPT2_BASE
+#define OMAP5_TIMER_IRQ 38
 
 /* BOARD CODE */
 #define OMAP5_TIMER_BASE		GPT2_BASE
-#define OMAP5_UART_BASE UART3_BASE
+#define OMAP5_UART_BASE OMAP54XX_UART3_BASE
 #define OMAP5_UART_BAUDRATE 115200
 #define OMAP5_UART_CLOCK 48000000 
 
@@ -73,6 +74,8 @@ uint64_t Omap5_get_timebase(void);
 #define mmio_write(a,v) (*(volatile uint32_t *)(a) = (v))
 #define mmio_set(a,v)   mmio_write((a), mmio_read((a)) | (v))
 #define mmio_clear(a,v) mmio_write((a), mmio_read((a)) & ~(v))
+
+#define barrier()               __asm__ __volatile__("": : :"memory");
 
 #define HwReg(x) *((volatile unsigned long*)(x))
 
@@ -108,6 +111,24 @@ static uint64_t clock_absolute_time = 0;
 #define TIMER_OVERFLOW_VAL	0xffffffff
 #define TIMER_LOAD_VAL		0
 
+enum {
+	TIDR = 0,
+	TIOCP_CFG = 0x10,
+	TISR = 0x28,
+	TIER = 0x2c,
+	TICR = 0x30,
+	TWER = 0x34,
+	TCLR = 0x38,
+	TCRR = 0x3c,
+	TLDR = 0x40,
+	TTGR = 0x44,
+	TWPC = 0x48,
+	TMAR = 0x4c,
+	TCAR1 = 0x50,
+	TCICR = 0x54,
+	TCAR2 = 0x58,
+};
+
 #define TCLR_ST			(0x1 << 0)
 #define TCLR_AR			(0x1 << 1)
 #define TCLR_PRE		(0x1 << 5)
@@ -124,7 +145,7 @@ static void timer_configure(void)
     clock_decrementer = CONFIG_SYS_HZ;
     kprintf(KPRINTF_PREFIX "decrementer frequency = %llu\n", clock_decrementer);
 
-    rtc_configure(hz);
+    rtc_configure(CONFIG_SYS_HZ);
     return;
 }
 
@@ -234,6 +255,17 @@ void Omap5_timebase_init(void)
 /******************************************************************************
  * OMAP5 UART
  *****************************************************************************/
+
+#define RBR     0x0
+#define IER     0x4
+#define FCR     0x8
+#define LCR     0xC
+#define MCR     0x10
+#define LSR     0x14            // 335x
+#define MSR     0x18
+#define SCR     0x1C
+#define SSR     0x44            // 335x
+
 #define LCR_BKSE	0x80        /* Bank select enable */
 #define LCR_8N1		0x03
 
