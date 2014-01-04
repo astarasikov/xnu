@@ -34,7 +34,7 @@
 //XXX: look at A15 vs A9 differences
 
 #ifdef BOARD_CONFIG_OMAP5432_UEVM
-#define __ARM_PROCESSOR_CLASS_CORTEX_A9__
+#define __ARM_PROCESSOR_CLASS_CORTEX_A9__ 1
 #endif
 
 /* ARMv7 Cortex-A9 platforms. */
