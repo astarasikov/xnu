@@ -140,20 +140,23 @@ void arm_init(boot_args * args)
      * Set maximum memory size based on boot-args. 
      */
     if (!PE_parse_boot_argn("maxmem", &baMaxMem, sizeof(baMaxMem)))
-        maxMem = 0;
+        maxMem = 256 * 1024 * 1024;
     else
         maxMem = (uint64_t) baMaxMem *(1024 * 1024);
 
+	PE_early_puts("calling arm_vm_init\n");
     /*
      * After this, we'll no longer be using physical mappings created by the bootloader. 
      */
     arm_vm_init(maxMem, args);
 
+	PE_early_puts("calling kernel_early_bootstrap\n");
     /*
      * Kernel early bootstrap. 
      */
     kernel_early_bootstrap();
 
+	PE_early_puts("calling PE_init_platform\n");
     /*
      * PE platform init. 
      */
@@ -187,6 +190,8 @@ void arm_init(boot_args * args)
         (void) switch_to_serial_console();
         disableConsoleOutput = FALSE;   /* Allow printfs to happen */
     }
+	PE_early_puts("starting timer\n");
+	kprintf("starting timer\n");
 
     /*
      * Start system timers. 
@@ -200,12 +205,16 @@ void arm_init(boot_args * args)
     /*
      * Processor identification.
      */
+	PE_early_puts("calling arm_processor_identify\n");
     arm_processor_identify();
 
     /*
      * VFP/float initialization. 
      */
+	PE_early_puts("calling init_vfp\n");
     init_vfp();
+
+	PE_early_puts("calling machine_startup\n");
 
     /*
      * Machine startup. 
