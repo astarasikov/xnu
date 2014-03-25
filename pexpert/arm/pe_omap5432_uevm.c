@@ -48,6 +48,9 @@
 #define OMAP54XX_L4_CORE_BASE	0x4A000000
 #define OMAP54XX_L4_WKUP_BASE	0x4AE00000
 #define OMAP54XX_L4_PER_BASE	0x48000000
+ 
+#define OMAP5_GIC_BASE 0x48211000
+#define OMAP5_GIC_CPU_BASE 0x48212000
 
 /* Debugging UART */
 #define OMAP54XX_UART3_BASE		(OMAP54XX_L4_PER_BASE + 0x20000)
@@ -55,14 +58,20 @@
 /* General Purpose Timer */
 #define GPT2_BASE		(OMAP54XX_L4_PER_BASE  + 0x32000)
 
-#define OMAP5_TIMER_BASE GPT2_BASE
-#define OMAP5_TIMER_IRQ 38
+//#define OMAP5_TIMER_BASE GPT2_BASE
+//#define OMAP5_TIMER_IRQ 38
+//
+#define OMAP5_TIMER_BASE 0x4ae18000
+#define OMAP5_ARM_TIMER_BASE 0x4ae18000
 
 /* BOARD CODE */
 #define OMAP5_TIMER_BASE		GPT2_BASE
 #define OMAP5_UART_BASE OMAP54XX_UART3_BASE
 #define OMAP5_UART_BAUDRATE 115200
 #define OMAP5_UART_CLOCK 48000000 
+
+#define OMAP5_CLKCTRL_BASE 0x4ae07000
+#define OMAP5_GPTIMER1_CLKCTRL 0x4ae07840
 
 #ifdef BOARD_CONFIG_OMAP5432_UEVM
 
@@ -87,8 +96,9 @@ extern void rtc_configure(uint64_t hz);
 vm_offset_t gOmapSerialUartBase = 0x0;
 vm_offset_t gOmapInterruptControllerBase = 0x0;
 vm_offset_t gOmapTimerBase = 0x0;
-vm_offset_t gOmapDisplayControllerBase = 0x0;
-vm_offset_t gOmapPrcmBase = 0x0;
+vm_offset_t gGICGICDistributorBase = 0x0;
+vm_offset_t gGICCPUBase = 0x0;
+vm_offset_t gOmapClkCtrlBase = 0x0;
 
 static uint64_t clock_decrementer = 0;
 static boolean_t clock_initialized = FALSE;
@@ -165,6 +175,15 @@ void Omap5_timer_enabled(int enable)
     else
         HwReg(gOmapTimerBase + TCLR) &= ~TCLR_ST;
 
+#if 0
+	if (enable) {
+		HwReg(gARMTimerBase + 8) = ((1 << 5) | (1 << 7) | (1 << 6));
+	}
+	else {
+		HwReg(gARMTimerBase + 8) &= ~(1 << 7);
+	}
+#endif
+
     return;
 }
 
@@ -189,16 +208,20 @@ uint64_t Omap5_get_timebase(void)
 
 void Omap5_timebase_init(void)
 {
-    gOmapTimerBase = ml_io_map(OMAP5_TIMER_BASE, PAGE_SIZE);
     /*
      * Stop the timer. 
      */
     Omap5_timer_enabled(FALSE);
+    
+	int i;
+	for (i=0; i < 224; i += 32)
+        HwReg(gGICGICDistributorBase + 0x100 + i * 4/32) = 0xffffffff;
+	barrier();
 
     /*
      * Enable interrupts 
      */
-    //ml_set_interrupts_enabled(TRUE);
+    ml_set_interrupts_enabled(TRUE);
 
     /*
      * Set rtclock stuff 
@@ -226,16 +249,16 @@ void Omap5_timebase_init(void)
      */
     HwReg(gOmapTimerBase + TISR) = 0x7;
     HwReg(gOmapTimerBase + TIER) = 0x7;
+	HwReg(gOmapTimerBase + 0x24) = 0;
+	HwReg(gOmapTimerBase + TTGR) = 2;
 
-    /*
-     * Set to 32KHz 
-     */
-    //mmio_set(gOmapPrcmBase + 0xc40, 0x40);
+	/* cm_wkup_gptimer1_clkctrl, GPTIMER1_CLKCTRL_CLKSEL_MASK set */	
+	//HwReg(OMAP5_GPTIMER1_CLKCTRL) |= (1 << 24);
 
     /*
      * Arm the timer 
      */
-    //HwReg(gOmapTimerBase + TCLR) = (1 << 0) | (1 << 1) | (2 << 10);
+    HwReg(gOmapTimerBase + TCLR) |= (1 << 0) | (1 << 1) | (2 << 10);
 
     /*
      * Wait for it. 
@@ -327,6 +350,10 @@ int Omap5_getc(void)
 void Omap5_uart_init(void)
 {
     int baudDivisor;
+    gGICGICDistributorBase = ml_io_map(OMAP5_GIC_BASE, PAGE_SIZE);
+    gGICCPUBase = ml_io_map(OMAP5_GIC_CPU_BASE, PAGE_SIZE);
+    gOmapTimerBase = ml_io_map(OMAP5_TIMER_BASE, PAGE_SIZE);
+	gOmapClkCtrlBase = ml_io_map(OMAP5_CLKCTRL_BASE, PAGE_SIZE);
     gOmapSerialUartBase = ml_io_map(OMAP5_UART_BASE, PAGE_SIZE);
 
     assert(OMAP5_UART_BAUDRATE != 0);
@@ -342,93 +369,121 @@ void Omap5_uart_init(void)
 }
 
 /******************************************************************************
- * OMAP5 GIC
+ * A15 GIC
  *****************************************************************************/
+#define GIC_CPU_REG(off)            ((off))
+#define GIC_DIST_REG(off)           ((off))
 
-/*
- * GIC @48211000
- *
- */
+#define GIC_CPU_CTRL                GIC_CPU_REG(0x00)
+#define GIC_CPU_PRIMASK             GIC_CPU_REG(0x04)
+#define GIC_CPU_BINPOINT            GIC_CPU_REG(0x08)
+#define GIC_CPU_INTACK              GIC_CPU_REG(0x0c)
+#define GIC_CPU_EOI                 GIC_CPU_REG(0x10)
+#define GIC_CPU_RUNNINGPRI          GIC_CPU_REG(0x14)
+#define GIC_CPU_HIGHPRI             GIC_CPU_REG(0x18)
 
-void Omap5_interrupt_init(void)
+#define GIC_DIST_CTRL               GIC_DIST_REG(0x000)
+#define GIC_DIST_CTR                GIC_DIST_REG(0x004)
+#define GIC_DIST_ENABLE_SET         GIC_DIST_REG(0x100)
+#define GIC_DIST_ENABLE_CLEAR       GIC_DIST_REG(0x180)
+#define GIC_DIST_PENDING_SET        GIC_DIST_REG(0x200)
+#define GIC_DIST_PENDING_CLEAR      GIC_DIST_REG(0x280)
+#define GIC_DIST_ACTIVE_BIT         GIC_DIST_REG(0x300)
+#define GIC_DIST_PRI                GIC_DIST_REG(0x400)
+#define GIC_DIST_TARGET             GIC_DIST_REG(0x800)
+#define GIC_DIST_CONFIG             GIC_DIST_REG(0xc00)
+#define GIC_DIST_SOFTINT            GIC_DIST_REG(0xf00)
+
+#define GIC_PPI_START 16
+#define GIC_SPI_START 32
+
+
+/* Intialize distributor */
+static void gic_dist_init(void)
 {
-    //gOmapInterruptControllerBase = ml_io_map(OMAP5_GIC_BASE, PAGE_SIZE);
-#if 0
-    int i;
+    uint32_t i;
+    uint32_t num_irq = 0;
+    uint32_t cpumask = 1;
+
+    cpumask |= cpumask << 8;
+    cpumask |= cpumask << 16;
+
+    /* Disabling GIC */
+    HwReg(gGICGICDistributorBase + GIC_DIST_CTRL) = 0;
 
     /*
-     * Disable interrupts 
+     * Find out how many interrupts are supported.
      */
-    ml_set_interrupts_enabled(FALSE);
+    num_irq = HwReg(gGICGICDistributorBase + GIC_DIST_CTR) & 0x1f;
+    num_irq = (num_irq + 1) * 32;
+
+    /* Set each interrupt line to use N-N software model
+     * and edge sensitive, active high
+     */
+    for (i=32; i < num_irq; i += 16)
+        HwReg(gGICGICDistributorBase + GIC_DIST_CONFIG + i * 4/16) = 0xffffffff;
+
+    HwReg(gGICGICDistributorBase + GIC_DIST_CONFIG + 4) = 0xffffffff;
+
+    /* Set up interrupts for this CPU */
+    for (i = 32; i < num_irq; i += 4)
+        HwReg(gGICGICDistributorBase + GIC_DIST_TARGET + i * 4 / 4) = cpumask;
+
+    /* Set priority of all interrupts*/
 
     /*
-     * Set MIR bits to enable all interrupts 
+     * In bootloader we dont care about priority so
+     * setting up equal priorities for all
      */
-    HwReg(INTCPS_MIR(0)) = 0xffffffff;
-    HwReg(INTCPS_MIR(1)) = 0xffffffff;
-    HwReg(INTCPS_MIR(2)) = 0xffffffff;
+    for (i=0; i < num_irq; i += 4)
+        HwReg(gGICGICDistributorBase + GIC_DIST_PRI) = 0xa0a0a0a0;
 
-    /*
-     * Set the true bits 
-     */
-    mmio_write(INTCPS_MIR_CLEAR(37 >> 5), 1 << (37 & 0x1f));
+    /* Disabling interrupts*/
+    for (i=0; i < num_irq; i += 32)
+        HwReg(gGICGICDistributorBase + GIC_DIST_ENABLE_CLEAR + i * 4/32) = 0xffffffff;
 
-    /*
-     * Set enable new IRQs/FIQs 
-     */
-    HwReg(INTCPS_CONTROL) = (1 << 0);
+    HwReg(gGICGICDistributorBase + GIC_DIST_ENABLE_SET) = 0xffff;
 
-    barrier();
-#endif
+    /*Enabling GIC*/
+    HwReg(gGICGICDistributorBase + GIC_DIST_CTRL) = 0x1;
+}
+
+/* Intialize cpu specific controller */
+static void gic_cpu_init(void)
+{
+    HwReg(gGICCPUBase + GIC_CPU_PRIMASK) = 0xf0;
+    HwReg(gGICCPUBase + GIC_CPU_CTRL) = 0x1;
+}
+
+void GIC_interrupt_init(void)
+{
+    assert(gGICGICDistributorBase && gGICCPUBase);
+
+    /* Initialize GIC. */
+    gic_dist_init();
+    gic_cpu_init();
+
     return;
 }
 
-void Omap5_handle_interrupt(void *context)
+void GIC_handle_interrupt(void *context)
 {
-#if 0
-    uint32_t irq_number = (HwReg(INTCPS_SIR_IRQ)) & 0x7F;
-
-    if (irq_number == 37) {     /* GPTimer1 IRQ */
-        /*
-         * Stop the timer 
-         */
-        Omap5_timer_enabled(FALSE);
-
-        /*
-         * Clear interrupt status 
-         */
-        HwReg(gOmapTimerBase + TISR) = 0x7;
-
-        /*
-         * FFFFF 
-         */
-        rtclock_intr((arm_saved_state_t *) context);
-
-        /*
-         * Set new IRQ generation 
-         */
-        HwReg(INTCPS_CONTROL) = 0x1;
-
-        /*
-         * ARM IT. 
-         */
-        Omap5_timer_enabled(TRUE);
-
-        /*
-         * Update absolute time 
-         */
-        clock_absolute_time += (clock_decrementer - Omap5_timer_value());
-
-        clock_had_irq = 1;
-
+    uint32_t irq_no = HwReg(gGICCPUBase + GIC_CPU_INTACK);
+    if(irq_no > 224) {
+        kprintf(KPRINTF_PREFIX "Got a bogus IRQ?");
         return;
-    } else {
-#ifdef _NOTYET
-        /* The I2C interface for the keypad kills things... */
-        irq_iokit_dispatch(irq_number);
-#endif
     }
-#endif 
+	kprintf(KPRINTF_PREFIX "IRQ %d\n", irq_no);
+
+	if (irq_no == (32 + 38) || irq_no == (32 + 37)) {
+		clock_had_irq = TRUE;
+	}
+	else {
+        //irq_iokit_dispatch(irq_no);
+    }
+
+    /* EOI. */
+    HwReg(gGICCPUBase + GIC_CPU_EOI) = irq_no;
     return;
 }
 
@@ -464,6 +519,8 @@ void Omap5_framebuffer_init(void)
 
     lcd_height = (vs >> 16) + 1;
     lcd_width = (vs & 0xffff) + 1;
+#else
+	uint32_t lcd_width = 1280, lcd_height = 768;
     kprintf(KPRINTF_PREFIX "lcd size is %u x %u\n", lcd_width, lcd_height);
 
     /*
@@ -528,12 +585,12 @@ void PE_init_SocSupport_omap5(void)
     gPESocDispatch.uart_putc = Omap5_putc;
     gPESocDispatch.uart_init = Omap5_uart_init;
 
-    gPESocDispatch.interrupt_init = Omap5_interrupt_init;
+    gPESocDispatch.interrupt_init = GIC_interrupt_init;
     gPESocDispatch.timebase_init = Omap5_timebase_init;
 
     gPESocDispatch.get_timebase = Omap5_get_timebase;
 
-    gPESocDispatch.handle_interrupt = Omap5_handle_interrupt;
+    gPESocDispatch.handle_interrupt = GIC_handle_interrupt;
 
     gPESocDispatch.timer_value = Omap5_timer_value;
     gPESocDispatch.timer_enabled = Omap5_timer_enabled;
@@ -542,6 +599,8 @@ void PE_init_SocSupport_omap5(void)
 
     Omap5_uart_init();
     PE_kputc = gPESocDispatch.uart_putc;
+
+	kprintf(KPRINTF_PREFIX "PE_init_SocSupport_omap5 done\n");
 
     Omap5_framebuffer_init();
 }
